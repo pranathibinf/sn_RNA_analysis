@@ -1,0 +1,30 @@
+task: >
+  You have been given single-nucleus RNA-seq data from human brain tissue
+  comparing Alzheimer's disease (AD) cases to control samples (subset of PRJNA975472 / GSE233208).
+  Using the provided pipeline outputs, answer the following objective questions.
+
+questions:
+  - id: q1
+    stage: counting
+    text: "How many cells are retained in the merged dataset after filtering?"
+    answer_type: integer_exact
+
+  - id: q2
+    stage: counting
+    text: "Which sample has the highest number of cells after filtering?"
+    answer_type: string_exact
+
+  - id: q3
+    stage: quantification
+    text: "Which gene has the highest total UMI count in SRR24710556?"
+    answer_type: string_exact
+
+  - id: q4
+    stage: clustering_markers
+    text: "List the top 3 marker genes for cluster 0 in order of adjusted p-value."
+    answer_type: ordered_list
+
+  - id: q5
+    stage: sparsity
+    text: "How many genes have all-zero counts in SRR24710556 in counts_unfiltered?"
+    answer_type: integer_exact
