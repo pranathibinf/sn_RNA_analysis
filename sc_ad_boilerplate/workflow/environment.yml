@@ -1,9 +1,12 @@
 name: ad_snrna
-channels: [conda-forge, bioconda, defaults]
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
 dependencies:
   - python=3.11
   - sra-tools
-  - bbmap            # for reformat.sh
+  - bbmap              # reformat.sh (paired-safe subsampling)
   - kb-python
   - kallisto=0.51
   - bustools
@@ -15,3 +18,7 @@ dependencies:
   - matplotlib
   - fastqc
   - multiqc
+  - biopython
+  - seaborn
+  - python-igraph
+  - leidenalg
