@@ -1,141 +1,233 @@
 #!/usr/bin/env bash
-# Quantification (kb) + Scanpy analysis + read counts
-# Vars: THREADS (default 4), CHEM (default 10xv3)
 set -euo pipefail
 
+# Run from repo root (this file lives in workflow/)
+cd "$(dirname "$0")/.."
+
+# -------- config (overridable) --------
+FASTQ_DIR="${FASTQ_DIR:-sc_ad_boilerplate/data/fastq_sub}"   # input FASTQs
+SAMPLES_TSV="${SAMPLES_TSV:-workflow/samples.tsv}"           # SRR/group table
+REF_DIR="workflow/ref"
+KB_OUT_DIR="workflow/kb_out"
+SCANPY_OUT_DIR="workflow/scanpy_out"
 THREADS="${THREADS:-4}"
 CHEM="${CHEM:-10xv3}"
+GZCAT_CMD="gunzip -c"
 
-ROOT="sc_ad_boilerplate"
-FASTQ_DIR="$ROOT/data/fastq_sub"
-REF_DIR="$ROOT/workflow/ref"
-KB_OUT="$ROOT/workflow/kb_out"
-SCANPY_OUT="$ROOT/workflow/scanpy_out"
-SAMPLES_TSV="$ROOT/samples.tsv"
+log(){ printf "[%s] %s\n" "$(date '+%H:%M:%S')" "$*"; }
+die(){ echo "ERROR: $*" >&2; exit 1; }
+need(){ command -v "$1" >/dev/null 2>&1 || die "Missing '$1' in PATH. Activate env?"; }
 
-mkdir -p "$REF_DIR" "$KB_OUT" "$SCANPY_OUT"
+need kb
+need python3
+mkdir -p "$REF_DIR" "$KB_OUT_DIR" "$SCANPY_OUT_DIR" "$FASTQ_DIR"
 
-for x in kb python; do
-  command -v "$x" >/dev/null || { echo "Missing: $x"; exit 1; }
-done
-
-# build reference once
-if [[ ! -s "$REF_DIR/index.idx" ]]; then
-  echo "[ref] kb ref (human)"
-  kb ref -d human -i "$REF_DIR/index.idx" -g "$REF_DIR/t2g.txt" \
-        -f1 "$REF_DIR/cdna.fa" -f2 "$REF_DIR/introns.fa"
-else
-  echo "[ref] found $REF_DIR/index.idx"
+# -------- samples.tsv  --------
+if [[ ! -f "$SAMPLES_TSV" ]]; then
+  log "samples.tsv not found — creating one from FASTQ names"
+  SRRS=$(ls "$FASTQ_DIR"/*_1.sub.fastq.gz 2>/dev/null | sed -E 's#.*/(SRR[0-9]+)_1\.sub\.fastq\.gz#\1#' | sort -u || true)
+  if [[ -z "${SRRS:-}" ]]; then
+    SRRS="SRR24710554 SRR24710556 SRR24710558 SRR24710560"
+  fi
+  {
+    echo -e "SRR\tgroup"
+    for s in $SRRS; do
+      case "$s" in
+        SRR24710554|SRR24710558) grp="Control" ;;
+        SRR24710556|SRR24710560) grp="AD" ;;
+        *) grp="Unknown" ;;
+      esac
+      echo -e "$s\t$grp"
+    done
+  } > "$SAMPLES_TSV"
+  log "wrote $SAMPLES_TSV"
 fi
 
-# kb count per sample
-echo "[kb] count (chem=$CHEM, threads=$THREADS)"
-tail -n +2 "$SAMPLES_TSV" | while read -r srr group; do
-  [[ -z "$srr" ]] && continue
-  r1="$FASTQ_DIR/${srr}_1.sub.fastq.gz"
-  r2="$FASTQ_DIR/${srr}_2.sub.fastq.gz"
-  out="$KB_OUT/$srr"
-  if [[ ! -s "$r1" || ! -s "$r2" ]]; then
-    echo "[warn] missing FASTQs for $srr"; continue
+# -------- reference  --------
+REF_IDX="$REF_DIR/index.idx"
+if [[ ! -f "$REF_IDX" ]]; then
+  log "ref: building kallisto|bustools human reference"
+  set +e
+  kb ref -d human \
+    -i "$REF_IDX" \
+    -g "$REF_DIR/t2g.txt" \
+    -f1 "$REF_DIR/cdna.fa" \
+    -f2 "$REF_DIR/introns.fa"
+  rc=$?
+  set -e
+  if [[ $rc -ne 0 || ! -f "$REF_IDX" ]]; then
+    log "ref: primary failed; using fallback download"
+    URL="https://github.com/pachterlab/kallisto-transcriptome-indices/releases/download/v1/human_index_standard.tar.xz"
+    TGT="workflow/tmp_human_index_standard.tar.xz"
+    mkdir -p workflow
+    curl -L --fail --retry 3 --retry-delay 3 -o "$TGT" "$URL"
+    tar -xJf "$TGT" -C "$REF_DIR"
   fi
-  if [[ -d "$out/counts_unfiltered" ]]; then
-    echo "  - $srr: exists"; continue
+  [[ -f "$REF_IDX" ]] || die "reference build failed"
+else
+  log "ref: found $REF_IDX"
+fi
+
+# -------- quantification --------
+log "kb: count (chem=$CHEM, threads=$THREADS)"
+tail -n +2 "$SAMPLES_TSV" | while IFS=$'\t' read -r srr group; do
+  [[ "$srr" == SRR* ]] || continue
+  fq1="$FASTQ_DIR/${srr}_1.sub.fastq.gz"
+  fq2="$FASTQ_DIR/${srr}_2.sub.fastq.gz"
+  out="$KB_OUT_DIR/$srr"
+  if [[ -s "$fq1" && -s "$fq2" ]]; then
+    log "kb: $srr"
+    kb count \
+      -i "$REF_IDX" \
+      -g "$REF_DIR/t2g.txt" \
+      -x "$CHEM" \
+      -t "$THREADS" \
+      -o "$out" \
+      "$fq1" "$fq2"
+  else
+    log "warn: missing FASTQs for $srr in $FASTQ_DIR"
   fi
-  kb count -i "$REF_DIR/index.idx" -g "$REF_DIR/t2g.txt" -x "$CHEM" -t "$THREADS" -o "$out" "$r1" "$r2"
 done
 
-# read counts (R1)
-echo -e "sample\treads"
-for r1 in "$FASTQ_DIR"/*_1.sub.fastq.gz; do
-  s=$(basename "$r1" _1.sub.fastq.gz)
-  n=$(zcat "$r1" | wc -l | awk '{print int($1/4)}')
-  echo -e "$s\t$n"
+# -------- 10x-compat shim (gz output) --------
+log "compat: creating 10x-style files"
+tail -n +2 "$SAMPLES_TSV" | while IFS=$'\t' read -r srr group; do
+  [[ "$srr" == SRR* ]] || continue
+  d="$KB_OUT_DIR/$srr/counts_unfiltered"
+  [[ -d "$d" ]] || { log "compat: skip $srr (no counts_unfiltered)"; continue; }
+
+  # matrix.mtx.gz
+  if [[ -f "$d/cells_x_genes.mtx" ]]; then
+    gzip -c "$d/cells_x_genes.mtx" > "$d/matrix.mtx.gz"
+  fi
+
+  # barcodes.tsv + barcodes.tsv.gz
+  if [[ -f "$d/cells_x_genes.barcodes.txt" ]]; then
+    ln -sf "cells_x_genes.barcodes.txt" "$d/barcodes.tsv"
+    gzip -c "$d/cells_x_genes.barcodes.txt" > "$d/barcodes.tsv.gz"
+  fi
+
+  # features.tsv.gz (gene_id \t gene_symbol \t Gene Expression)
+  if [[ -f "$d/cells_x_genes.genes.txt" ]]; then
+    if [[ -f "$d/cells_x_genes.genes.names.txt" ]]; then
+      paste "$d/cells_x_genes.genes.txt" "$d/cells_x_genes.genes.names.txt" \
+        | awk -F'\t' 'BEGIN{OFS="\t"}{sym=$2; if(sym==""){sym=$1}; print $1, sym, "Gene Expression"}' \
+        | gzip -c > "$d/features.tsv.gz"
+    else
+      awk '{print $1"\t"$1"\tGene Expression"}' "$d/cells_x_genes.genes.txt" \
+        | gzip -c > "$d/features.tsv.gz"
+    fi
+  fi
 done
 
-# Scanpy: merge, QC, UMAP, markers, DE per cluster
-python - <<'PY'
-import os, pandas as pd, scanpy as sc
+# -------- Scanpy analysis  --------
+log "scanpy: analysis"
+python3 <<'PYCODE'
+import os, gzip, numpy as np, pandas as pd
 from scipy.io import mmread
+from scipy.sparse import csr_matrix
+import anndata as ad
+import scanpy as sc
 
-ROOT="sc_ad_boilerplate"
-SAMPLES=os.path.join(ROOT,"samples.tsv")
-KB=os.path.join(ROOT,"workflow","kb_out")
-OUT=os.path.join(ROOT,"workflow","scanpy_out")
-os.makedirs(OUT, exist_ok=True)
+KB_OUT_DIR = "workflow/kb_out"
+SCANPY_OUT_DIR = "workflow/scanpy_out"
+SAMPLES_TSV = "workflow/samples.tsv"
 
-df=pd.read_csv(SAMPLES, sep=None, engine="python")
+os.makedirs(SCANPY_OUT_DIR, exist_ok=True)
+sc.settings.figdir = SCANPY_OUT_DIR
 
-def read_one(srr):
-    d=os.path.join(KB,srr,"counts_unfiltered")
-    m=os.path.join(d,"cells_x_genes.mtx")
-    b=os.path.join(d,"cells_x_genes.barcodes.txt")
-    g1=os.path.join(d,"cells_x_genes.genes.names.txt")
-    g2=os.path.join(d,"cells_x_genes.genes.txt")
-    if not os.path.exists(m): return None
-    X=mmread(m).tocsr()
-    ad=sc.AnnData(X)
-    ad.obs_names=pd.read_csv(b,header=None)[0].astype(str).values
-    ad.var_names=pd.read_csv(g1 if os.path.exists(g1) else g2,header=None)[0].astype(str).values
-    return ad
+def read_lines(path):
+    if path.endswith(".gz"):
+        return [l.decode().strip() for l in gzip.open(path, "rb")]
+    return [l.strip() for l in open(path, "r")]
 
-ads=[]
-for _,row in df.iterrows():
-    srr=row['srr']; grp=row['group']
-    ad=read_one(srr)
-    if ad is None: 
-        print(f"[WARN] missing counts for {srr}")
+samples = pd.read_csv(SAMPLES_TSV, sep="\t")
+adatas = []
+for _, row in samples.iloc[1:].iterrows() if list(samples.columns)!=['SRR','group'] else samples.iloc[1:].iterrows():
+    srr = str(row["SRR"])
+    d = os.path.join(KB_OUT_DIR, srr, "counts_unfiltered")
+
+    mtx = os.path.join(d, "matrix.mtx.gz")
+    if not os.path.exists(mtx): mtx = os.path.join(d, "matrix.mtx")
+    feats = os.path.join(d, "features.tsv.gz")
+    if not os.path.exists(feats): feats = os.path.join(d, "features.tsv")
+    bar = os.path.join(d, "barcodes.tsv.gz")
+    if not os.path.exists(bar): bar = os.path.join(d, "barcodes.tsv")
+
+    if not (os.path.exists(mtx) and os.path.exists(feats) and os.path.exists(bar)):
+        print(f"[scanpy] skip {srr}: missing matrix/features/barcodes in {d}")
         continue
-    ad.obs['sample']=srr; ad.obs['group']=grp; ad.obs['batch']=srr
-    ads.append(ad)
 
-assert ads, "No matrices found"
+    X = mmread(mtx).tocsr()
+    features = [ln.split("\t") for ln in read_lines(feats)]
+    gene_ids = [f[0] for f in features]
+    gene_syms = [ (f[1] if len(f)>1 and f[1] else f[0]) for f in features ]
+    barcodes = read_lines(bar)
 
-adata=ads[0].concatenate(ads[1:], batch_key="concat_batch",
-                         batch_categories=[a.obs['sample'][0] for a in ads],
-                         index_unique="-")
-adata.var["mt"]=adata.var_names.str.upper().str.startswith("MT-")
-sc.pp.calculate_qc_metrics(adata, qc_vars=["mt"], inplace=True)
-
-adata=adata[adata.obs["n_genes_by_counts"]>=100].copy()
-adata=adata[adata.obs["n_genes_by_counts"]<=8000].copy()
-adata=adata[adata.obs["pct_counts_mt"]<25].copy()
-sc.pp.filter_genes(adata, min_cells=3)
-
-sc.pp.normalize_total(adata, target_sum=1e4)
-sc.pp.log1p(adata)
-sc.pp.highly_variable_genes(adata, n_top_genes=2000, subset=True)
-sc.tl.pca(adata, svd_solver="arpack")
-sc.pp.neighbors(adata, n_neighbors=15, n_pcs=30)
-sc.tl.umap(adata)
-sc.tl.leiden(adata, resolution=0.5)
-
-sc.pl.umap(adata, color=["group","sample","leiden","pct_counts_mt"], wspace=0.4, show=False)
-import matplotlib.pyplot as plt
-plt.savefig(os.path.join(OUT,"umap_overview.png"), dpi=200, bbox_inches="tight")
-
-adata.obs.groupby(["sample","group"]).size().to_frame("n_cells").reset_index()\
-  .to_csv(os.path.join(OUT,"cell_counts_by_sample_group.csv"), index=False)
-
-sc.tl.rank_genes_groups(adata, "leiden", method="wilcoxon")
-sc.get.rank_genes_groups_df(adata, group=None)\
-  .to_csv(os.path.join(OUT,"markers_per_cluster_wilcoxon.csv"), index=False)
-
-outs=[]
-for cl in sorted(adata.obs["leiden"].unique(), key=str):
-    ad_cl=adata[adata.obs["leiden"]==cl].copy()
-    c=ad_cl.obs["group"].value_counts().to_dict()
-    if c.get("AD",0)>=5 and c.get("Control",0)>=5:
-        sc.tl.rank_genes_groups(ad_cl,"group",groups=["AD"],reference="Control",method="wilcoxon")
-        df=sc.get.rank_genes_groups_df(ad_cl, group="AD")
-        df.insert(0,"cluster",cl); df.insert(1,"n_AD",c.get("AD",0)); df.insert(2,"n_Control",c.get("Control",0))
-        outs.append(df)
+    # Orient matrix: cells x genes
+    if X.shape[0] == len(gene_ids) and X.shape[1] == len(barcodes):
+        X = X.transpose().tocsr()
+    elif X.shape[0] == len(barcodes) and X.shape[1] == len(gene_ids):
+        pass
     else:
-        outs.append(pd.DataFrame({"cluster":[cl],"n_AD":[c.get("AD",0)],"n_Control":[c.get("Control",0)]}))
-if outs:
-    pd.concat(outs, ignore_index=True).to_csv(os.path.join(OUT,"DE_AD_vs_Control_per_cluster.csv"), index=False)
+        raise RuntimeError(f"{srr}: matrix shape {X.shape} doesn't match genes={len(gene_ids)} / cells={len(barcodes)}")
 
-adata.write(os.path.join(OUT,"alz_snrna_merged.h5ad"))
-print("[scanpy] results in", OUT)
-PY
+    obs = pd.DataFrame(index=barcodes)
+    obs["barcode"] = barcodes
+    obs["sample"] = srr
+    obs["group"] = row.get("group", "Unknown")
 
-echo "[ok] Pipeline complete. See $SCANPY_OUT"
+    var = pd.DataFrame(index=gene_ids)
+    var["gene_id"] = gene_ids
+    var["gene_symbol"] = gene_syms
+    var_names = pd.Series(gene_syms).replace("", np.nan).fillna(pd.Series(gene_ids)).values
+
+    adata = ad.AnnData(X=X, obs=obs, var=var)
+    adata.var_names = var_names
+    adatas.append(adata)
+
+if not adatas:
+    raise SystemExit("[scanpy] No matrices loaded — nothing to analyze.")
+
+adata = ad.concat(adatas, join="outer", label="sample_concat", keys=[a.obs["sample"][0] for a in adatas])
+
+# Basic pipeline
+sc.pp.filter_cells(adata, min_genes=200)
+sc.pp.filter_genes(adata, min_cells=3)
+sc.pp.normalize_total(adata, target_sum=1e4); sc.pp.log1p(adata)
+sc.pp.highly_variable_genes(adata, min_mean=0.0125, max_mean=3, min_disp=0.5)
+adata = adata[:, adata.var.highly_variable].copy()
+sc.pp.scale(adata, max_value=10)
+sc.tl.pca(adata, svd_solver='arpack')
+sc.pp.neighbors(adata, n_neighbors=10, n_pcs=40)
+sc.tl.umap(adata)
+
+# Try Leiden; if igraph/leidenalg missing, skip if not
+leiden_ok = True
+try:
+    import igraph, leidenalg  # noqa: F401
+    sc.tl.leiden(adata, key_added="leiden")
+except Exception as e:
+    print(f"[scanpy] Leiden skipped (install python-igraph & leidenalg to enable). Reason: {e}")
+    leiden_ok = False
+
+# Plots & save
+colors = ['group']
+if leiden_ok: colors.append('leiden')
+sc.pl.umap(adata, color=colors, save="_overview.png", show=False)
+adata.write(os.path.join(SCANPY_OUT_DIR, "alz_snrna_merged.h5ad"))
+print(f"[scanpy] wrote {os.path.join(SCANPY_OUT_DIR, 'alz_snrna_merged.h5ad')}")
+PYCODE
+
+# -------- read-count summary (R1) --------
+printf "sample\treads\n"
+tail -n +2 "$SAMPLES_TSV" | while IFS=$'\t' read -r srr group; do
+  [[ "$srr" == SRR* ]] || continue
+  fq1="$FASTQ_DIR/${srr}_1.sub.fastq.gz"
+  [[ -s "$fq1" ]] || continue
+  reads=$($GZCAT_CMD "$fq1" | wc -l | awk '{printf "%.0f", $1/4}')
+  printf "%s\t%s\n" "$srr" "$reads"
+done
+
+log "done: pipeline completed."
+
