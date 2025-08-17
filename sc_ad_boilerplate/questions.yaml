@@ -1,30 +1,30 @@
 task: >
-  You have been given single-nucleus RNA-seq data from human brain tissue
-  comparing Alzheimer's disease (AD) cases to control samples (subset of PRJNA975472 / GSE233208).
-  Using the provided pipeline outputs, answer the following objective questions.
+ You have been given snRNA-seq data from Alzheimer's disease (AD) and Control mouse brain tissue.
+ Using the provided FASTQs and analysis pipeline, answer the following:
 
 questions:
-  - id: q1
-    stage: counting
-    text: "How many cells are retained in the merged dataset after filtering?"
-    answer_type: integer_exact
+ - id: q1
+   stage: quantification
+   text: "Which entry from spliced.genes.txt has the highest total counts across all samples?"
+   answer_type: string_exact
 
-  - id: q2
-    stage: counting
-    text: "Which sample has the highest number of cells after filtering?"
-    answer_type: string_exact
+ - id: q2
+   stage: highly_variable_genes
+   text: "How many highly variable genes (HVGs) were selected?"
+   answer_type: integer_exact
 
-  - id: q3
-    stage: quantification
-    text: "Which gene has the highest total UMI count in SRR24710556?"
-    answer_type: string_exact
+ - id: q3
+   stage: dimensionality_reduction
+   text: "What percentage of variance is explained by the first principal component (PC1)?"
+   answer_type: numeric_percent
+   tolerance: 0.5
 
-  - id: q4
-    stage: clustering_markers
-    text: "List the top 3 marker genes for cluster 0 in order of adjusted p-value."
-    answer_type: ordered_list
+ - id: q4
+   stage: dimensionality_reduction
+   text: "Rank the top 3 PCs by variance explained."
+   answer_type: ordered_list
 
-  - id: q5
-    stage: sparsity
-    text: "How many genes have all-zero counts in SRR24710556 in counts_unfiltered?"
-    answer_type: integer_exact
+ - id: q5
+   stage: clustering
+   text: "Which cluster has the largest number of cells?"
+   answer_type: string_exact
