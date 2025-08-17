@@ -3,7 +3,7 @@ set -euo pipefail
 
 THREADS=4
 REF_DIR="sc_ad_boilerplate/workflow/ref"
-FASTQ_DIR="sc_ad_boilerplate/data/fastq_sub"
+FASTQ_DIR="${FASTQ_DIR:-/tmp/files}"   # default to /tmp/files for Taiga
 OUT_DIR="sc_ad_boilerplate/workflow/kb_out"
 
 mkdir -p "$OUT_DIR"
