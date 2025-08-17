@@ -110,3 +110,5 @@ python sc_ad_boilerplate/workflow/04_scanpy_analysis.py
 ```bash
 zcat sc_ad_boilerplate/data/fastq_sub/<SRR>_1.sub.fastq.gz | wc -l
 ```
+Notes:
+This pipeline was run on Google colab with high RAM CPU (51 GB)
