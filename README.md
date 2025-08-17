@@ -16,6 +16,7 @@ This task is based on publicly available sequencing data from a study of Alzheim
 
 ## 2. Repository layout:
 
+```
 sc-alzheimer-analysis/
 ├── README.md
 ├── LICENSE
@@ -28,6 +29,7 @@ sc-alzheimer-analysis/
         ├── 03_kb_count.sh
         ├── 04_scanpy_analysis.py
         └── environment.yml
+```
 
 # 3. Installation
 Create and activate the environment:
