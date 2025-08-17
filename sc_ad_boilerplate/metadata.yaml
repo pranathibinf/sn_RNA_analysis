@@ -1,11 +1,12 @@
-paper_title: Single-nucleus RNA-Seq and spatial transcriptomics characterization of Alzheimer’s Disease and Down Syndrome
+paper_title: "Single-nucleus RNA-Seq and spatial transcriptomics characterization of Alzheimer’s Disease and Down Syndrome"
 doi: "10.1038/s41588-024-01961-x"
 data_source: "GEO SuperSeries: GSE233208"
 domain: snRNA_seq
 ref_genome: "Mus_musculus GRCm38 (Ensembl release 98)"
 tools:
-  - kb-python 0.27.3
+  - kb-python 0.29.5
   - scanpy 1.10.2
   - anndata 0.10.8
-estimated_runtime_minutes: 115
+  - scikit-misc 0.1.4
+estimated_runtime_minutes: 120
 estimated_time_for_human: 180

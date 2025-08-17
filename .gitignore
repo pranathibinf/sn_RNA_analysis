@@ -1,0 +1,45 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+.env
+.venv
+*.sqlite3
+
+# --- Bash / Scripts ---
+*.log
+*.out
+*.err
+*.tmp
+*.bak
+*.swp
+
+# --- OS / IDE ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- Other ---
+*.tar.gz
+*.zip
+*.gz
+*.bz2
+*.7z
