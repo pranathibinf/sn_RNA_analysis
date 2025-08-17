@@ -24,10 +24,10 @@ sc-alzheimer-analysis/
     ├── metadata.yaml
     ├── samples.tsv
     └── workflow/
-        ├── 01_fetch_and_fastq.sh
-        ├── 02_build_ref.sh
-        ├── 03_kb_count.sh
-        ├── 04_scanpy_analysis.py
+        ├── 01_build_ref.sh
+        ├── 02_kb_count.sh
+        ├── 03_scanpy_analysis.py
+		├── 04_question_answers.py
         └── environment.yml
 ```
 
