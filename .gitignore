@@ -43,3 +43,6 @@ Thumbs.db
 *.gz
 *.bz2
 *.7z
+# --- Data folder ---
+data/*
+!data/.gitkeep
