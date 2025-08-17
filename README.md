@@ -18,16 +18,19 @@ This task is based on publicly available sequencing data from a study of Alzheim
 
 sc-alzheimer-analysis/
 ├── README.md
+├── LICENSE
 └── sc_ad_boilerplate/
     ├── metadata.yaml
     ├── samples.tsv
     └── workflow/
-        ├── environment.yml
         ├── 01_fetch_and_fastq.sh
-        └── 02_pipeline.sh
+        ├── 02_build_ref.sh
+        ├── 03_kb_count.sh
+        ├── 04_scanpy_analysis.py
+        └── environment.yml
 
-# 3. To download data
-The pipeline supports two modes:
+# 3. Installation
+Create and activate the environment:
 
 - **Prefetch**: download `.sra` locally, then convert to FASTQ  
 - **Stream**: download and process directly without storing `.sra` locally
@@ -49,54 +52,59 @@ RATE=0.20 bash sc_ad_boilerplate/workflow/01_fetch_and_fastq.sh
 
 # 4.  Pre-processing / subsampling
 The script:
-	1.	Converts .sra to paired FASTQ files
-	2.	Subsamples reads in a paired-safe manner
-	3.	Stores them in:
+  1. Converts .sra to paired FASTQ files
+  2. Subsamples reads in a paired-safe manner (default: 10%)
+  3. Stores them in:
  ```bash
 sc_ad_boilerplate/data/fastq_sub/
 ```
 ## Pipeline Execution
 
 ```bash
-# defaults: RATE=0.10, CHEM=10xv3, THREADS=4
-bash sc_ad_boilerplate/workflow/02_pipeline.sh
-# if you only want to re-run quantification/analysis using existing fastq_sub/:
-bash sc_ad_boilerplate/workflow/02_pipeline.sh
+# defaults: RATE=0.10, THREADS=4
+bash sc_ad_boilerplate/workflow/01_fetch_and_fastq.sh
+
+# if you only want to stream directly from SRA without storing .sra:
+STREAM=1 bash sc_ad_boilerplate/workflow/01_fetch_and_fastq.sh
+
+# change subsample rate (e.g., 20%)
+RATE=0.20 bash sc_ad_boilerplate/workflow/01_fetch_and_fastq.sh
 ```
 # 5. Workflow
-## Build reference (kb ref)
-Purpose: Prepare kallisto|bustools reference for human ; Tools: kb ; Inputs: none (downloads human reference) ; Outputs: workflow/ref/index.idx, t2g.txt, FASTA files
+## Step 1 – Build reference (kb ref) 
+Purpose: Prepare kallisto|bustools reference for **mouse (Mus musculus, GRCm38, Ensembl 98)**  
+Tools: kb  ;
+Inputs: Ensembl FASTA + GTF (downloaded automatically)  ;
+Outputs: workflow/ref/index.idx, t2g.txt, FASTA files
 
 ```bash
-kb ref -d human \
-  -i sc_ad_boilerplate/workflow/ref/index.idx \
-  -g sc_ad_boilerplate/workflow/ref/t2g.txt \
-  -f1 sc_ad_boilerplate/workflow/ref/cdna.fa \
-  -f2 sc_ad_boilerplate/workflow/ref/introns.fa
+bash sc_ad_boilerplate/workflow/02_build_ref.sh
 ```
 ## Step 2 – Quantification (kb count)
-Purpose: Quantify transcripts from paired subsampled FASTQs ; Tools: kb (kallisto|bustools) ; Inputs: subsampled FASTQs from data/fastq_sub/ ; Outputs: matrices under workflow/kb_out/<SRR>/counts_unfiltered/
+Purpose: Quantify transcripts from paired subsampled FASTQs  ;
+Tools: kb (kallisto|bustools)  ;
+Inputs: subsampled FASTQs from `data/fastq_sub/`  ;
+Outputs: matrices under `workflow/kb_out/<SRR>/counts_unfiltered/`workflow/kb_out/<SRR>/counts_unfiltered/
 ```bash
-kb count \
-  -i sc_ad_boilerplate/workflow/ref/index.idx \
-  -g sc_ad_boilerplate/workflow/ref/t2g.txt \
-  -x 10xv3 -t 4 \
-  -o sc_ad_boilerplate/workflow/kb_out/<SRR> \
-  sc_ad_boilerplate/data/fastq_sub/<SRR>_1.sub.fastq.gz \
-  sc_ad_boilerplate/data/fastq_sub/<SRR>_2.sub.fastq.gz
+bash sc_ad_boilerplate/workflow/03_kb_count.sh
 ```
 ## Step 3 – Analysis (Scanpy)
-Purpose: merge samples, QC, UMAP, cluster markers, AD vs Control per-cluster ; Tools: Scanpy ; Inputs: matrices from workflow/kb_out/*/counts_unfiltered/ ; Outputs: figures and tables in workflow/scanpy_out/
+Purpose: Merge samples, perform QC, UMAP, clustering, and compare AD vs Control  ;
+Tools: Scanpy (v1.10.2)  ;
+Inputs: matrices from `workflow/kb_out/*/counts_unfiltered/`  ;
+Outputs: figures and tables in `workflow/scanpy_out/`
 
 ```bash
-# full pipeline (quantification + analysis + read counts)
-bash sc_ad_boilerplate/workflow/02_pipeline.sh
+python sc_ad_boilerplate/workflow/04_scanpy_analysis.py
 ```
 # 6. Primary outputs:
-1.	sc_ad_boilerplate/workflow/scanpy_out/umap_overview.png – UMAP of all cells
-2.	sc_ad_boilerplate/workflow/scanpy_out/cell_counts_by_sample_group.csv – cell counts per sample & group
-3.	sc_ad_boilerplate/workflow/scanpy_out/markers_per_cluster_wilcoxon.csv – cluster markers
-4.	sc_ad_boilerplate/workflow/scanpy_out/DE_AD_vs_Control_per_cluster.csv – DE results per cluster
-5.	sc_ad_boilerplate/workflow/scanpy_out/alz_snrna_merged.h5ad – merged AnnData object
+1. sc_ad_boilerplate/workflow/scanpy_out/umap_overview.png – UMAP of all cells
+2. sc_ad_boilerplate/workflow/scanpy_out/cell_counts_by_sample_group.csv – cell counts per sample & group
+3. sc_ad_boilerplate/workflow/scanpy_out/markers_per_cluster_wilcoxon.csv – cluster markers
+4. sc_ad_boilerplate/workflow/scanpy_out/DE_AD_vs_Control_per_cluster.csv – DE results per cluster
+5. sc_ad_boilerplate/workflow/scanpy_out/alz_snrna_merged.h5ad – merged AnnData object
 
-Read counts: the pipeline also prints reads per sample based on R1 (zcat | wc -l / 4).
+**Read counts check:**
+```bash
+zcat sc_ad_boilerplate/data/fastq_sub/<SRR>_1.sub.fastq.gz | wc -l
+```
