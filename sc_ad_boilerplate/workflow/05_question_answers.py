@@ -30,12 +30,12 @@ else:
     adata = sc.concat(adatas, join="outer", label="sample_id", keys=[a.obs["sample"][0] for a in adatas])
     print(f"Merged {len(adatas)} samples")
 
-# ========= Q1: gene with highest counts =========
+# ========= Q1: Gene with highest total count =========
 gene_counts = np.array(adata.X.sum(axis=0)).flatten()
 top_gene = adata.var_names[np.argmax(gene_counts)]
 print("Q1:", top_gene)
 
-# ========= Q2: highly variable genes =========
+# ========= Q2: Highly variable gene count =========
 sc.pp.normalize_total(adata, target_sum=1e4)
 sc.pp.log1p(adata)
 sc.pp.highly_variable_genes(adata, n_top_genes=2000, flavor="seurat", subset=False)
@@ -50,20 +50,20 @@ pc_var = adata.uns["pca"]["variance_ratio"]
 pc1_var = pc_var[0] * 100
 print("Q3:", round(pc1_var, 2), "%")
 
-# Rank top 3 PCs
+# Q4: Top 3 principal components based on variance
 top3 = np.argsort(-pc_var)[:3] + 1
 print("Q4:", [f"PC{pc}" for pc in top3])
 
-# ========= Q5: clustering =========
+# ========= Q5: Clustering and Leiden =========
 sc.pp.neighbors(adata, n_neighbors=10, n_pcs=10)
 sc.tl.umap(adata)
 sc.tl.leiden(adata, resolution=0.5)
 
-cluster_sizes = adata.obs["leiden"].value_counts()
-largest_cluster = cluster_sizes.idxmax()
-print("Q5:", largest_cluster)
+n_clusters = adata.obs["leiden"].nunique()
+print("Q5:", n_clusters)
 
-# ========= Save outputs =========
+# ========= Save merged .h5ad + UMAP =========
 os.makedirs("sc_ad_boilerplate/workflow/scanpy_out", exist_ok=True)
 adata.write("sc_ad_boilerplate/workflow/scanpy_out/alz_snrna_merged.h5ad")
+
 sc.pl.umap(adata, color=["sample", "leiden"], wspace=0.4, save="_overview.png")
